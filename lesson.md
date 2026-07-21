@@ -1,30 +1,46 @@
-# Lesson
+# Brief
 
-## Brief
+## Preparation & Initial Setup
 
-### Preparation
+Before starting this lesson, please ensure your environment and cloud services are fully configured:
 
-Create the conda environment based on the `elt-environment.yml` file in the [environment folder](https://github.com/su-ntu-ctp/5m-data-2.1-intro-big-data-eng/tree/main/environments). We will also be using google cloud (for which the account was created in the previous unit) in this lesson.
+1.  **Conda Environment:** Create and activate the conda environment based on the `elt-environment.yml` file in the [environment folder](https://github.com/su-ntu-ctp/5m-data-2.1-intro-big-data-eng/tree/main/environments):
+    ```bash
+    conda activate elt
+    ```
+2.  **Google Cloud Platform (GCP):** Ensure your GCP account is set up (created in the previous unit) and the `gcloud` CLI is installed (optional):
+    [Google Cloud SDK Installation Guide](https://cloud.google.com/sdk/docs/install)
 
-### Lesson Overview
+---
 
-Due to the rise of cloud data warehouse, data pipelines and ingestion model has shifted from Extract, Transform and Load (ETL) to Extract, Load and Transform (ELT), as alluded to in the previous unit. We learnt about the _Transform_ part in unit 2.5, as well as the _Extract_ (data extraction and web scraping) in unit 2.4.
+## Lesson Overview & Learning Objectives
 
-In this lesson, we will instead use a framework (and platform) called `Meltano` which handles the end-to-end data pipeline, from **ingestion** (_Extract_ and _Load_), to _Transform_ via `Dbt` once the data is loaded into the data warehouse.
+With the rise of modern cloud data warehouses, the industry standard for data pipelines has shifted from **ETL** (Extract, Transform, Load) to **ELT** (Extract, Load, Transform). 
 
-We will also learn about an orchestration framework called `Dagster`. Data orchestration is the process of automating the data pipeline, including scheduling, monitoring, and alerting. `Dagster` is an open-source data orchestration framework for data engineering, data science, and machine learning pipelines.
+*   **ETL (Traditional):** Data is transformed *before* loading it into the destination, which can be slow and bottlenecked by local compute resources.
+*   **ELT (Modern):** Raw data is loaded directly into the cloud data warehouse first, leveraging the warehouse's massive, scalable compute power to perform transformations.
 
-### Learning Objectives
+In previous units, we explored these components individually:
+*   **Extract:** Web scraping and API extraction (Unit 2.4)
+*   **Transform:** SQL-based data modeling (Unit 2.5)
+
+In this lesson, we will tie these concepts together using a modern, code-first data stack:
+
+```
+[ Data Sources ] ──( Extract & Load )──► [ BigQuery ] ──( Transform )──► [ Analytical Models ]
+                       ▲                                     ▲
+                 ┌─────┴─────────────────────────────────────┴─────┐
+                 │             Orchestrated by Dagster             │
+                 └─────────────────────────────────────────────────┘
+```
 
 By the end of this lesson, you will be able to:
 
-1. Explain the difference between ETL and ELT, and why ELT is preferred in modern cloud data stacks
-2. Use Meltano to extract data from an API source (GitHub) and load it into BigQuery
-3. Use Meltano to extract data from a relational database (Postgres/Supabase) and load it into BigQuery
-4. Use dbt to transform raw ingested data in BigQuery into analytical models
-5. Build a simple Dagster pipeline that schedules and orchestrates data assets
-
-### How This Lesson Is Structured
+1.  **Explain the difference** between ETL and ELT, and why ELT is preferred in modern cloud data stacks
+2.  **Use Meltano** to extract data from an API source (GitHub) and load it into BigQuery
+3.  **Use Meltano** to extract data from a relational database (Postgres/Supabase) and load it into BigQuery
+4.  **Use dbt** to transform raw ingested data in BigQuery into analytical models
+5.  **Build a simple Dagster pipeline** that schedules and orchestrates data assets
 
 This lesson has three parts, each building on the previous:
 
@@ -33,8 +49,6 @@ This lesson has three parts, each building on the previous:
 | Part 1 | Ingest GitHub data → BigQuery | Meltano, tap-github, target-bigquery |
 | Part 2 | Ingest Postgres (HDB resale) data → BigQuery, then transform it | Meltano, tap-postgres, target-bigquery, dbt |
 | Part 3 _(Optional)_ | Orchestrate and schedule the pipeline | Dagster |
-
-You can think of the full picture as:
 
 ```
 Data Sources          Ingestion (EL)       Warehouse        Transform (T)     Orchestration
@@ -45,26 +59,9 @@ Postgres/Supabase ──► (tap → target)
 
 ---
 
-## Initial Set up
+# Part 1 - Hands-on with ELT
 
-Ensure you have conda setup as mentioned in the preparation section.
-
-You should have `elt` conda environment ready. You can activate it via:
-
-```
-conda activate elt
-```
-
-
-Also - please ensure you have a Google cloud setup for GCP as well as installed the gcloud CLI:
-
-https://cloud.google.com/sdk/docs/install 
-
----
-
-## Part 1 - Hands-on with ELT
-
-### Background
+## Background
 
 In the late 2010s, numerous companies and open-source initiatives emerged to address the challenge of ELT in the burgeoning world of SaaS. They sought to streamline the process of assimilating data from multiple SaaS platforms into a unified warehouse for analysis, mainly for Business Analytics purposes.
 
@@ -78,7 +75,14 @@ In 2018, the project was rebranded as `Meltano`. Building on the original Singer
 
 ![meltano](assets/meltano.png)
 
-### Why Meltano Instead of Writing Our Own Scripts?
+## Meltano Core Philosophy & Decoupled Design
+
+Meltano's architecture is built on two core principles that make it highly suitable for modern enterprise data stacks:
+
+*   **Git-Native & Code-First:** Unlike proprietary SaaS integration platforms that charge volume-based fees ("fee by volume"), Meltano is open-source and stores all configurations in code (`meltano.yml`). This makes your entire data integration pipeline version-controlled, testable, and fully compatible with CI/CD workflows.
+*   **Decoupled Architecture (Taps & Targets):** Meltano strictly separates data extraction from loading. By decoupling "extractors" (**Taps**) from "loaders" (**Targets**), a single connector can be reused across multiple destinations (e.g., extracting from Salesforce and loading into BigQuery, Snowflake, or a local JSONL file for testing) without rewriting any integration logic.
+
+## Why Meltano Instead of Writing Our Own Scripts?
 
 In unit 2.4, we wrote Python scripts to call the GitHub API and extract data manually. That works for a one-off task, but in production data engineering, you need pipelines that:
 
@@ -87,9 +91,16 @@ In unit 2.4, we wrote Python scripts to call the GitHub API and extract data man
 - Can be extended to dozens of sources without rewriting everything from scratch
 - Produce logs and state so you know what was extracted and when
 
+## DataOps, Observability, and Production Best Practices
+
+As pipelines scale, data engineering transitions from simple scripting to **DataOps**. This introduces several critical production requirements:
+
+*   **Observability:** Beyond standard system monitoring, DataOps requires data-specific observability. This includes tracking data quality, validating schemas, and detecting **data drift** (unexpected changes in source schemas or data distributions that could break downstream models).
+*   **Production Infrastructure:** While running Meltano locally is excellent for development, production pipelines should run on dedicated cloud-based virtual machines or containerized environments (e.g., Kubernetes, Cloud Run, or VM instances). This ensures robust credential management, high availability, and prevents local network saturation during large-scale data transfers.
+
 Meltano solves all of this. The same GitHub data we pulled manually in unit 2.4 can be extracted, loaded into BigQuery, and scheduled — all with configuration rather than custom code.
 
-### What You Will Do in Part 1 (Steps Overview)
+## What You Will Do in Part 1 (Steps Overview)
 
 1. Create a Meltano project (`meltano-ingestion`)
 2. Add and configure `tap-github` to extract pandas release data from the GitHub API
@@ -97,7 +108,7 @@ Meltano solves all of this. The same GitHub data we pulled manually in unit 2.4 
 4. Add and configure `target-bigquery` to load data into your BigQuery data warehouse
 5. Run the full EL pipeline
 
-### Create a Meltano Project
+## Create a Meltano Project
 
 We will create a Meltano project and use it to
 
@@ -124,7 +135,7 @@ meltano config set meltano python python3.11
 
 > **Why set the Python version?** Meltano installs each tap and target into its own virtual environment. Setting the Python version here ensures all plugins use the same Python version as your conda environment, avoiding version mismatch errors.
 
-### Add an Extractor to Pull Data from Github
+## Add an Extractor to Pull Data from Github
 
 > **What is an extractor (tap)?** In Meltano's terminology, a _tap_ is a plugin that reads data from a source — an API, a database, a file, etc. — and outputs it in a standardised format. Meltano's Hub provides pre-built taps for hundreds of sources, so you don't have to write API clients from scratch.
 
@@ -202,7 +213,7 @@ We add a JSON target to test our pipeline. The JSON target will dump the data in
 meltano add target-jsonl
 ```
 
-### Test Run Github to JSON
+## Test Run Github to JSON
 
 We can now test run the pipeline to see if it works.
 
@@ -216,7 +227,7 @@ The extracted data will be dumped into a JSON file in the `output/` directory.
 
 You can find the above tutorial here: https://docs.meltano.com/getting-started/part1/#select-entities-and-attributes-to-extract
 
-### Add a Loader to Load Data into BigQuery
+## Add a Loader to Load Data into BigQuery
 
 > **What is a loader (target)?** A _target_ is the counterpart to a tap — it receives the standardised data stream from the tap and writes it to a destination. `target-bigquery` writes data directly into a BigQuery dataset, handling table creation, schema inference, and batching automatically.
 
@@ -249,7 +260,7 @@ Set the following options:
 > **What do `flattening_enabled` and `denormalized` do?** APIs often return nested JSON (objects inside objects). `flattening_enabled: true` tells the loader to automatically flatten nested fields into separate columns, making the data easier to query with SQL. `denormalized: true` ensures that nested repeated fields are expanded into individual rows rather than stored as JSON strings.
 
 
-### Temporary Work Around for Meltano Packaging Issue
+## Temporary Work Around for Meltano Packaging Issue
 On February 6, 2026, `setuptools` released version 81.0.0, which officially removed the module `pkg_resources` entirely which meltano depends on. The work around fix is as follows:
 1. Open `meltano.yml` under the project folder `meltano-ingestion`.
 2. Under `name: target-bigquery`, look for `pip_url: git+https://github.com/z3z1ma/target-bigquery.git`
@@ -257,7 +268,7 @@ On February 6, 2026, `setuptools` released version 81.0.0, which officially remo
 
 ![alt text](assets/meltano_fix.png)
 
-### Run Github to BigQuery
+## Run Github to BigQuery
 
 We can now run the full ingestion (extract-load) pipeline.
 
@@ -271,9 +282,9 @@ You will see the logs printed out in your console. Once the pipeline is complete
 
 ---
 
-## Part 2 - ELT from Postgres to Bigquery using HDB Resales Data with dbt
+# Part 2 - ELT from Postgres to Bigquery using HDB Resales Data with dbt
 
-### Why Part 2 Is Different from Part 1
+## Why Part 2 Is Different from Part 1
 
 In Part 1, we extracted data from an **external API** (GitHub). In Part 2, we extract from an **internal relational database** (Postgres on Supabase) — a more common scenario in enterprise data engineering, where operational databases hold transactional data that needs to flow into the data warehouse for analysis.
 
@@ -284,7 +295,14 @@ Postgres (Supabase)  ──►  BigQuery (raw)  ──►  dbt models (transform
       Extract + Load                               Transform
 ```
 
-### What You Will Do in Part 2 (Steps Overview)
+## Enterprise Pipeline Design & Best Practices
+
+When moving from simple API ingestion to enterprise-scale database replication, keep these architectural best practices in mind:
+
+*   **Project Organization ("One Database, One Project" Rule):** For clean architecture and maintainability, follow the "one database, one project" rule. Isolating separate business domains or master data pipelines into dedicated Meltano projects prevents dependency conflicts and simplifies access control.
+*   **Configuration Management:** While different data domains should ideally be split into separate configuration files for ease of maintenance, they can coexist in a single `meltano.yml` file if they share the same destination (e.g., a single BigQuery data warehouse).
+
+## What You Will Do in Part 2 (Steps Overview)
 
 1. Create a second Meltano project (`meltano-resale`) — separate from the first, because each data source gets its own project
 2. Add and configure `tap-postgres` to connect to the HDB resale database on Supabase
@@ -295,7 +313,7 @@ Postgres (Supabase)  ──►  BigQuery (raw)  ──►  dbt models (transform
 7. Write dbt source and model files
 8. Run dbt to build the transformed tables in BigQuery
 
-### Create HDB Resale Data in Postgres-Supabase (Optional)
+## Create HDB Resale Data in Postgres-Supabase (Optional)
 
 > Supabase is an open-source backend-as-a-service platform that provides a suite of tools for building applications powered by PostgreSQL (Postgres) as its database. Postgres is a powerful, object-relational database system known for its reliability, extensibility and compliance with SQL standards. Supabase simplifies database management by offering an intuitive interface to interact with Postgres, making it a popular choice for developers looking for a scalable and flexible backend solution.
 
@@ -303,7 +321,7 @@ Go to the [Supabase](https://supabase.com) and create an account. Download the H
 
 > You can skip the database creation if you do not have the time, we will provide a similar database during class.   
 
-### Add an Extractor to Pull Data from Postgres (Supabase)
+## Add an Extractor to Pull Data from Postgres (Supabase)
 
 We will use the `tap-postgres` extractor to pull data from a Postgres database hosted on [Supabase](https://supabase.com). 
 
@@ -332,6 +350,9 @@ meltano config set meltano python python3.11
 ```
 
 We're going to add an extractor for Postgres to get our data. An extractor is responsible for pulling data out of any data source. We will use the `tap-postgres` extractor to pull data from the Supabase server. 
+
+> **Enterprise Tip: SAP & Legacy System Connectivity**
+> When connecting to complex enterprise systems like SAP, high-level application-layer connectors can often be slow or restrictive. In production environments, it is often more reliable and performant to extract data directly from the underlying SQL database (using database-specific taps like `tap-postgres` or `tap-oracle`) rather than relying on application-layer APIs.
 
 To add the extractor to our project, run:
 
@@ -378,7 +399,7 @@ Use the following command to list and confirm our selection:
 meltano select tap-postgres --list
 ```
 
-### Add a Loader to Load Data into BigQuery
+## Add a Loader to Load Data into BigQuery
 
 We will now add a loader to load the data into BigQuery.
 
@@ -403,7 +424,7 @@ Set the following options:
 
 > **Why `batch_size: 104857600`?** This sets the maximum batch size to 100MB. The HDB resale dataset is large (~180,000+ rows). A larger batch size means fewer round-trips to BigQuery, which makes the load faster and more efficient.
 
-### Temporary Work Around for Meltano Packaging Issue
+## Temporary Work Around for Meltano Packaging Issue
 On February 6, 2026, `setuptools` released version 81.0.0, which officially removed the module `pkg_resources` entirely which meltano depends on. The work around fix is as follows:
 1. Open `meltano.yml` under the project folder `meltano-resale`.
 2. Under `name: target-bigquery`, look for `pip_url: git+https://github.com/z3z1ma/target-bigquery.git`
@@ -413,7 +434,7 @@ On February 6, 2026, `setuptools` released version 81.0.0, which officially remo
 
 You can refer to an example of the `meltano.yml` in the `solutions` branch of the lesson 2.6 repo [here](https://github.com/su-ntu-ctp/5m-data-2.6-data-pipelines-orchestration/blob/solutions/solutions/meltano-ingestion/meltano.yml).
 
-### Run Supabase (Postgres) to BigQuery
+## Run Supabase (Postgres) to BigQuery
 
 We can now run the full ingestion (extract-load) pipeline from Supabase to BigQuery.
 
@@ -427,7 +448,7 @@ You will see the logs printed out in your console. Once the pipeline is complete
 
 ---
 
-### Create Dbt project
+## Create Dbt project
 
 > **Why dbt after Meltano?** Meltano's job is to get the data into the warehouse as faithfully as possible — it does not clean or transform it. The raw table from Meltano reflects exactly what was in Postgres, including string-typed numeric columns. dbt is where we apply business logic: casting types, calculating derived columns, and building aggregated models that are ready for analysis or dashboards.
 
@@ -470,7 +491,7 @@ resale_flat:
 ```
 
 
-### Create source and models
+## Create source and models
 
 > **What is a dbt source?** A source tells dbt where the raw data lives — which dataset and table in BigQuery. By declaring it in a `source.yml` file, dbt can reference it by name in your SQL models (using `{{ source(...) }}`), and can also run freshness checks to alert you if the source data has stopped updating.
 
@@ -486,7 +507,7 @@ Create the following files inside the `resale_flat/models/` folder:
 > 2. Create a `prices.sql` model (materialized table) which selects all columns from the source table, cast the `floor_area_sqm` to numeric, then add a new column `price_per_sqm` which is the `resale_price` divided by `floor_area_sqm`.
 > 3. Create a `prices_by_town_type_model.sql` model (materialized table) which selects the `town`, `flat_type` and `flat_model` columns from `prices`, group by them and calculate the average of `floor_area_sqm`, `resale_price` and `price_per_sqm`. Finally, sort by `town`, `flat_type` and `flat_model`.
 
-### Run Dbt
+## Run Dbt
 
 Check dbt connection first. Make sure you are inside the `resale_flat` folder before running the commands below.
 
@@ -519,9 +540,9 @@ You should see 2 new tables in the `resale` dataset.
 
 ---
 
-## Part 3 - Hands-on with Orchestration I (Optional)
+# Part 3 - Hands-on with Orchestration I (Optional)
 
-### Why Orchestration?
+## Why Orchestration?
 
 At this point, you can run Meltano and dbt pipelines manually from the command line. But in production, data pipelines need to run automatically — every day, every hour, or triggered by an event. You also need visibility into whether they succeeded or failed, and the ability to re-run failed steps.
 
@@ -534,7 +555,7 @@ This is what **data orchestration** solves. An orchestrator is responsible for:
 
 `Dagster` is a modern, Python-native orchestration framework that models pipelines around **data assets** (what is produced) rather than tasks (what runs). This makes it easier to reason about data lineage — you can see exactly which datasets depend on which, and re-run only the parts that failed.
 
-### How Dagster Compares to Alternatives
+## How Dagster Compares to Alternatives
 
 | Tool | Model | Strengths |
 |------|-------|-----------|
@@ -544,7 +565,7 @@ This is what **data orchestration** solves. An orchestrator is responsible for:
 
 We use Dagster here because its asset model maps naturally to what we already built — each dbt model and Meltano pipeline can be represented as an asset.
 
-### What You Will Do in Part 3 (Steps Overview)
+## What You Will Do in Part 3 (Steps Overview)
 
 1. Create a Dagster project (`dagster-orchestration`)
 2. Write two data assets in Python: one that fetches GitHub pandas release data, and one that computes summary statistics from it
@@ -552,7 +573,7 @@ We use Dagster here because its asset model maps naturally to what we already bu
 4. Attach a schedule to run the job daily
 5. Launch the Dagster UI and manually trigger the pipeline to verify it works
 
-### Create a Dagster Project
+## Create a Dagster Project
 
 We need to use `dagster-environment.yml` file in the [environment folder](https://github.com/su-ntu-ctp/5m-data-2.1-intro-big-data-eng/tree/main/environments) in the repository of module 2.1. Create the environment and run the following command to activate the environment:
 
@@ -582,7 +603,7 @@ cd dagster-orchestration
 > - `dagster_orchestration/assets.py` — where you define your data assets (the functions that produce data)
 > - `dagster_orchestration/definitions.py` — where you wire assets, jobs, and schedules together and expose them to Dagster
 
-### Introduction to Software-Defined Assets, Pipelines, Jobs and Schedule
+## Introduction to Software-Defined Assets, Pipelines, Jobs and Schedule
 
 In Dagster, the main way to create data pipelines is by writing `Software-Defined Assets` (SDA). You can connect assets together (that depend on each other) to form a pipeline. An asset is a logical unit of data that can be produced or consumed by a pipeline. Assets can be any type of object, e.g.
 
@@ -603,7 +624,7 @@ A `job` lets you target a selection of assets to materialize them together as a 
 
 After defining a job, it can be attached to a `schedule`. A schedule's responsibility is to start a run of the assigned job at a specified time.
 
-### Introduction to I/O Managers
+## Introduction to I/O Managers
 
 Dagster uses I/O managers to manage how data is read from and written to assets. I/O stands for input and output. They manage input by reading an asset from where it's stored and loading it into memory to be used by a dependent asset. They control output by writing the assets to the location configured.
 
@@ -611,7 +632,7 @@ We will configure an I/O manager for reading/writing to database (file to storag
 
 > **In practice:** In this lesson, the default I/O manager stores asset outputs in memory (passed directly between functions in the same run). In production, you would configure a persistent I/O manager that writes outputs to a database or cloud storage, so assets can be read across separate runs.
 
-### Create Assets and Definitions
+## Create Assets and Definitions
 
 We will now create the assets and definitions for our pipeline.
 
@@ -751,7 +772,7 @@ Managing one type of definition, such as assets, is easy. However, it can quickl
 
 > **Reading the schedule:** `cron_schedule="0 0 * * *"` is standard cron syntax meaning "at 00:00 (midnight) every day". If you are unfamiliar with cron syntax, https://crontab.guru is a handy tool for building and reading cron expressions.
 
-### Run the pipeline
+## Run the pipeline
 
 Let's launch the Dagster UI, which allows us to explore the data assets, manually launch runs of the pipeline, and view the results of past runs.
 
@@ -779,9 +800,9 @@ You can also view the Job Schedule in the Automation tab of `pandas_job`. The sc
 
 ---
 
-## Appendix - Sample dbt Code
+# Appendix - Sample dbt Code
 
-### `models/source.yml`
+## `models/source.yml`
 
 ```yaml
 version: 2
@@ -793,7 +814,7 @@ sources:
       - name: public_resale_flat_prices_from_jan_2017
 ```
 
-### `models/prices.sql`
+## `models/prices.sql`
 
 ```sql
 {{ config(materialized='table') }}
@@ -818,7 +839,7 @@ select
 from source
 ```
 
-### `models/prices_by_town_type_model.sql`
+## `models/prices_by_town_type_model.sql`
 
 ```sql
 {{ config(materialized='table') }}
@@ -834,3 +855,20 @@ from {{ ref('prices') }}
 group by town, flat_type, flat_model
 order by town, flat_type, flat_model
 ```
+
+---
+
+# Troubleshooting & FAQ
+
+## 1. Meltano Execution Failures (setuptools issue)
+If you encounter execution failures during the Extract-Load phase, verify that the `setuptools<80` workaround is correctly applied in your `meltano.yml` file (specifically under the `target-bigquery` plugin definition). This prevents issues caused by the removal of `pkg_resources` in newer `setuptools` versions.
+
+## 2. WSL and Pathing Issues (Windows Users)
+If you are running on Windows Subsystem for Linux (WSL) and encounter pathing or permission errors when referencing service account JSON keys or local output directories, ensure that:
+- All file paths use Linux-style forward slashes (`/`).
+- Your GCP service account key is stored within the WSL file system (e.g., `/home/username/...`) rather than the Windows mount (`/mnt/c/...`) to avoid permission conflicts.
+
+## 3. dbt Profile Resolution Errors
+If `dbt debug` or `dbt run` fails with a "Profile should not be None" or "Profile not found" error:
+- Ensure your terminal is inside the `resale_flat` directory, not the repository root.
+- Verify that your project-level `profiles.yml` is correctly configured and that the profile name matches the profile specified in `dbt_project.yml`.
